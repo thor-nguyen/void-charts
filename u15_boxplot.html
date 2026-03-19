@@ -21,6 +21,10 @@
   #chart-section { display: none; }
   #svgContainer { text-align: center; }
   #svgContainer svg { max-width: 100%; height: auto; }
+  .chart-actions { text-align: center; margin-top: 15px; }
+  .chart-actions button { padding: 9px 20px; margin: 0 6px; font-size: 14px; border-radius: 6px; border: 1px solid #ccc; cursor: pointer; background: #fff; transition: all .15s; }
+  .chart-actions button:hover { background: #f0f4fa; border-color: #4C72B0; }
+  .chart-actions .status { display: inline-block; margin-left: 10px; font-size: 13px; color: #55A868; opacity: 0; transition: opacity .3s; }
   #tooltip { position: fixed; pointer-events: none; background: rgba(0,0,0,0.8); color: #fff; padding: 5px 10px; border-radius: 5px; font-size: 13px; display: none; z-index: 999; white-space: nowrap; }
   table { width: 100%; border-collapse: collapse; margin-top: 25px; font-size: 13px; }
   th, td { padding: 8px 12px; text-align: center; border: 1px solid #e0e0e0; }
@@ -47,6 +51,11 @@
   <div id="tooltip"></div>
   <div id="chart-section">
     <div id="svgContainer"></div>
+    <div class="chart-actions" id="chartActions" style="display:none">
+      <button onclick="copyChart()">📋 Copy as Image</button>
+      <button onclick="downloadChart()">💾 Download PNG</button>
+      <span class="status" id="copyStatus">✅ Copied!</span>
+    </div>
     <table id="stats"></table>
   </div>
 </div>
@@ -115,7 +124,7 @@ const std = a => { const m = mean(a); return Math.sqrt(a.reduce((s, v) => s + (v
 function drawSVGBoxPlot(builds, raw, sheetName) {
   const nBuilds = builds.length;
   const colWidth = Math.max(120, Math.min(180, 900 / nBuilds));
-  const mL = 65, mR = 30, mT = 20, mB = 55;
+  const mL = 65, mR = 75, mT = 20, mB = 55;
   const plotW = nBuilds * colWidth;
   const plotH = 420;
   const W = mL + plotW + mR;
@@ -145,10 +154,40 @@ function drawSVGBoxPlot(builds, raw, sheetName) {
   // Y axis title
   svg += `<text x="16" y="${mT + plotH / 2}" text-anchor="middle" dominant-baseline="central" font-size="13" fill="#555" transform="rotate(-90,16,${mT + plotH / 2})">Void Rate (%)</text>`;
 
+  // --- Ideal void range: horizontal dashed line at 30% + vertical arrow on right ---
+  const idealHigh = 30;
+  const iy30 = yToP(idealHigh);
+  const iy0 = yToP(0);
+  const blue = '#1a6dcc';
+  // Horizontal dashed line across full plot width
+  svg += `<line x1="${mL}" y1="${iy30}" x2="${mL + plotW}" y2="${iy30}" stroke="${blue}" stroke-width="2" stroke-dasharray="10,5"/>`;
+  // Vertical dashed arrow on the right side
+  const arrowX = mL + plotW + 22;
+  svg += `<defs><marker id="arrowDown" markerWidth="8" markerHeight="8" refX="4" refY="8" orient="auto"><path d="M0,0 L4,8 L8,0" fill="${blue}"/></marker>`;
+  svg += `<marker id="arrowUp" markerWidth="8" markerHeight="8" refX="4" refY="0" orient="auto"><path d="M0,8 L4,0 L8,8" fill="${blue}"/></marker></defs>`;
+  // Dashed line with arrows at both ends (30% to 0%)
+  svg += `<line x1="${arrowX}" y1="${iy30 + 4}" x2="${arrowX}" y2="${iy0 - 4}" stroke="${blue}" stroke-width="1.8" stroke-dasharray="6,4" marker-start="url(#arrowUp)" marker-end="url(#arrowDown)"/>`;
+  // Label rotated along the arrow
+  const labelX = arrowX + 15;
+  const labelY = (iy30 + iy0) / 2;
+  svg += `<text x="${labelX}" y="${labelY}" text-anchor="middle" dominant-baseline="central" font-size="12" font-style="italic" font-weight="600" fill="${blue}" transform="rotate(90,${labelX},${labelY})">Ideal void range</text>`;
+
   const boxW = colWidth * 0.45;
   const dotR = 3.5;
 
+  const COLORS = [
+    { fill: 'rgba(76,114,176,0.35)',  stroke: '#4C72B0', dot: '#2b4d7a', label: '#3a5a8e' },
+    { fill: 'rgba(85,168,104,0.35)',  stroke: '#55A868', dot: '#2e7a3f', label: '#3d8a50' },
+    { fill: 'rgba(196,78,82,0.35)',   stroke: '#C44E52', dot: '#8b2226', label: '#a33a3d' },
+    { fill: 'rgba(129,114,178,0.35)', stroke: '#8172B2', dot: '#4e4280', label: '#6558a0' },
+    { fill: 'rgba(204,185,116,0.35)', stroke: '#CCB974', dot: '#8a7a30', label: '#9a8a40' },
+    { fill: 'rgba(100,181,205,0.35)', stroke: '#64B5CD', dot: '#2a7a94', label: '#3a8aa4' },
+    { fill: 'rgba(237,141,100,0.35)', stroke: '#ED8D64', dot: '#b05020', label: '#c06030' },
+    { fill: 'rgba(162,162,162,0.35)', stroke: '#A2A2A2', dot: '#555555', label: '#666666' },
+  ];
+
   builds.forEach((buildName, i) => {
+    const c = COLORS[i % COLORS.length];
     const data = raw[buildName];
     const cx = mL + i * colWidth + colWidth / 2;
     const sorted = [...data].sort((a, b) => a - b);
@@ -162,18 +201,18 @@ function drawSVGBoxPlot(builds, raw, sheetName) {
     const capW = boxW * 0.5;
 
     // Whiskers
-    svg += `<line x1="${cx}" y1="${yQ3}" x2="${cx}" y2="${yMaxP}" stroke="#333" stroke-width="1.2"/>`;
-    svg += `<line x1="${cx}" y1="${yQ1}" x2="${cx}" y2="${yMinP}" stroke="#333" stroke-width="1.2"/>`;
+    svg += `<line x1="${cx}" y1="${yQ3}" x2="${cx}" y2="${yMaxP}" stroke="${c.stroke}" stroke-width="1.2"/>`;
+    svg += `<line x1="${cx}" y1="${yQ1}" x2="${cx}" y2="${yMinP}" stroke="${c.stroke}" stroke-width="1.2"/>`;
 
     // Caps
-    svg += `<line x1="${cx - capW}" y1="${yMaxP}" x2="${cx + capW}" y2="${yMaxP}" stroke="#333" stroke-width="1.2"/>`;
-    svg += `<line x1="${cx - capW}" y1="${yMinP}" x2="${cx + capW}" y2="${yMinP}" stroke="#333" stroke-width="1.2"/>`;
+    svg += `<line x1="${cx - capW}" y1="${yMaxP}" x2="${cx + capW}" y2="${yMaxP}" stroke="${c.stroke}" stroke-width="1.2"/>`;
+    svg += `<line x1="${cx - capW}" y1="${yMinP}" x2="${cx + capW}" y2="${yMinP}" stroke="${c.stroke}" stroke-width="1.2"/>`;
 
     // Box
-    svg += `<rect x="${cx - boxW / 2}" y="${yQ3}" width="${boxW}" height="${yQ1 - yQ3}" fill="white" stroke="#333" stroke-width="1.5"/>`;
+    svg += `<rect x="${cx - boxW / 2}" y="${yQ3}" width="${boxW}" height="${yQ1 - yQ3}" fill="${c.fill}" stroke="${c.stroke}" stroke-width="1.5"/>`;
 
     // Median
-    svg += `<line x1="${cx - boxW / 2}" y1="${yMed}" x2="${cx + boxW / 2}" y2="${yMed}" stroke="#333" stroke-width="1.8"/>`;
+    svg += `<line x1="${cx - boxW / 2}" y1="${yMed}" x2="${cx + boxW / 2}" y2="${yMed}" stroke="${c.stroke}" stroke-width="2"/>`;
 
     // Data points — JMP style stacking
     const tolerance = (yMax - yMin) * 0.012;
@@ -199,16 +238,17 @@ function drawSVGBoxPlot(builds, raw, sheetName) {
       group.forEach((val, gi) => {
         const px = n === 1 ? cx : startX + gi * spacing;
         const py = yToP(val);
-        svg += `<circle cx="${px}" cy="${py}" r="${dotR}" fill="#222" class="dot" data-tip="${buildName}: ${val.toFixed(2)}%" style="cursor:pointer"/>`;
+        svg += `<circle cx="${px}" cy="${py}" r="${dotR}" fill="${c.dot}" class="dot" data-tip="${buildName}: ${val.toFixed(2)}%" style="cursor:pointer"/>`;
       });
     });
 
-    // Label
-    svg += `<text x="${cx}" y="${mT + plotH + 18}" text-anchor="middle" font-size="13" fill="#333">${buildName}</text>`;
+    // Label (colored)
+    svg += `<text x="${cx}" y="${mT + plotH + 18}" text-anchor="middle" font-size="13" font-weight="600" fill="${c.label}">${buildName}</text>`;
   });
 
   svg += '</svg>';
   document.getElementById('svgContainer').innerHTML = svg;
+  document.getElementById('chartActions').style.display = 'block';
 
   // Tooltip events
   const tip = document.getElementById('tooltip');
@@ -242,6 +282,50 @@ function drawStats(builds, raw) {
       builds.map(l => `<td>${fn(raw[l])}</td>`).join('') + '</tr>';
   });
   document.getElementById('stats').innerHTML = html;
+}
+
+function svgToCanvas(scale) {
+  return new Promise(resolve => {
+    const svgEl = document.querySelector('#svgContainer svg');
+    const svgData = new XMLSerializer().serializeToString(svgEl);
+    const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width * scale;
+      canvas.height = img.height * scale;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = 'white';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      resolve(canvas);
+    };
+    img.src = url;
+  });
+}
+
+async function copyChart() {
+  try {
+    const canvas = await svgToCanvas(3);
+    canvas.toBlob(async blob => {
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      const s = document.getElementById('copyStatus');
+      s.style.opacity = '1';
+      setTimeout(() => s.style.opacity = '0', 2000);
+    }, 'image/png');
+  } catch (e) {
+    alert('Copy failed. Try the Download button instead.');
+  }
+}
+
+async function downloadChart() {
+  const canvas = await svgToCanvas(3);
+  const a = document.createElement('a');
+  a.download = 'boxplot.png';
+  a.href = canvas.toDataURL('image/png');
+  a.click();
 }
 </script>
 </body>
