@@ -2,103 +2,191 @@
 <html lang="vi">
 <head>
 <meta charset="UTF-8">
-<title>U15 - Void Rate Box Plot</title>
+<title>Void Rate Box Plot</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdn.jsdelivr.net/npm/@sgratzl/chartjs-chart-boxplot@4"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
   body { font-family: 'Segoe UI', Arial, sans-serif; background: #f5f5f5; margin: 0; padding: 30px; }
-  .container { max-width: 1000px; margin: 0 auto; background: #fff; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.1); padding: 30px; }
+  .container { max-width: 1050px; margin: 0 auto; background: #fff; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.1); padding: 30px; }
   h1 { text-align: center; color: #333; margin-bottom: 5px; font-size: 22px; }
-  .subtitle { text-align: center; color: #777; font-size: 14px; margin-bottom: 25px; }
+  .subtitle { text-align: center; color: #777; font-size: 14px; margin-bottom: 20px; }
+  .upload-area { text-align: center; padding: 30px; border: 2px dashed #ccc; border-radius: 10px; margin-bottom: 20px; background: #fafafa; }
+  .upload-area:hover { border-color: #4C72B0; background: #f0f4fa; }
+  .upload-btn { display: inline-block; padding: 12px 28px; background: #4C72B0; color: #fff; border-radius: 8px; cursor: pointer; font-size: 15px; border: none; }
+  .upload-btn:hover { background: #3a5a8e; }
+  .file-info { margin-top: 10px; color: #555; font-size: 13px; }
+  .sheet-selector { margin: 15px 0; text-align: center; }
+  .sheet-selector select { padding: 8px 16px; font-size: 14px; border-radius: 6px; border: 1px solid #ccc; }
+  .sheet-selector label { font-size: 14px; margin-right: 8px; color: #555; }
   canvas { max-height: 500px; }
   table { width: 100%; border-collapse: collapse; margin-top: 25px; font-size: 13px; }
   th, td { padding: 8px 12px; text-align: center; border: 1px solid #e0e0e0; }
   th { background: #f0f0f0; font-weight: 600; }
   .color-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+  #chart-section { display: none; }
+  .hint { color: #999; font-size: 12px; margin-top: 8px; }
 </style>
 </head>
 <body>
 <div class="container">
-  <h1>U15 — Void Rate Box Plot Comparison</h1>
-  <p class="subtitle">4 Builds: FF MP, ALC GW, ALC EX, DOE 200pcs (GW+EX)</p>
-  <canvas id="chart"></canvas>
-  <table id="stats"></table>
-</div>
-<script>
-const raw = {
-  'FF MP': [9.27,9.59,10.92,8.33,6.99,9.69,11.56,23.71,17.92,14.37,9.26,12.93,17.40,20.32,16.64,21.43,24.56,27.50,26.62,26.42,12.59,20.65,14.64,23.37],
-  'ALC GW': [24.57,23.60,3.51,24.94,23.82,14.79,24.57,5.60,31.29,22.18,23.15,7.62,10.83,25.84,19.42,27.04,20.31,20.54,20.61,29.95,8.38,4.78,13.67,31.74],
-  'ALC EX': [28.49,10.67,24.78,19.28,25.73,11.02,14.62,6.54,29.57,13.16,24.85,24.01,11.27,30.21,31.33,24.01,26.68,17.87,13.16,15.95,12.09,18.80,16.35,4.65],
-  'DOE 200pcs': [
-    27.67,23.12,6.24,8.55,42.15,13.07,14.03,14.30,9.67,16.83,31.89,10.24,11.48,23.41,5.12,3.12,29.58,25.45,14.22,11.88,6.44,25.27,18.12,1.36,
-    23.12,5.65,7.58,16.51,10.65,2.96,7.46,10.14,6.41,21.08,10.37,37.32,27.11,12.16,8.85,14.06,16.74,18.31,25.02,27.40,12.32,19.09,7.00,22.92,24.43,30.63,
-    13.96,25.31,12.27,13.69,19.65,5.08,12.12,18.40,20.20,9.18,2.23,3.26,22.67,31.22,22.11,2.33,7.11,7.08,7.15,7.59,3.24,3.99,19.37,13.27,
-    5.05,10.10,11.20,11.23,18.38,3.51,7.87,17.70,34.24,17.65,7.70,7.02,29.80,7.74,19.09,10.04,8.82,3.73,4.91,8.19,4.89,8.45,13.67,12.19,21.17,13.00
-  ]
-};
+  <h1>Void Rate Box Plot</h1>
+  <p class="subtitle">Load an Excel file (.xlsx) to generate box plot</p>
 
-const colors = [
-  {bg:'rgba(76,114,176,0.5)', border:'#4C72B0'},
-  {bg:'rgba(85,168,104,0.5)', border:'#55A868'},
-  {bg:'rgba(196,78,82,0.5)',  border:'#C44E52'},
-  {bg:'rgba(129,114,178,0.5)',border:'#8172B2'}
+  <div class="upload-area" id="dropZone">
+    <input type="file" id="fileInput" accept=".xlsx,.xls" style="display:none">
+    <button class="upload-btn" onclick="document.getElementById('fileInput').click()">📂 Select Excel File</button>
+    <p class="file-info" id="fileInfo">or drag & drop .xlsx file here</p>
+    <p class="hint">Expected format: each column = one build, header row = build names, data rows = void % values</p>
+  </div>
+
+  <div class="sheet-selector" id="sheetSelector" style="display:none">
+    <label for="sheetSelect">Sheet:</label>
+    <select id="sheetSelect"></select>
+  </div>
+
+  <div id="chart-section">
+    <canvas id="chart"></canvas>
+    <table id="stats"></table>
+  </div>
+</div>
+
+<script>
+let workbook = null;
+let chartInstance = null;
+
+const COLORS = [
+  {bg:'rgba(76,114,176,0.5)',  border:'#4C72B0'},
+  {bg:'rgba(85,168,104,0.5)',  border:'#55A868'},
+  {bg:'rgba(196,78,82,0.5)',   border:'#C44E52'},
+  {bg:'rgba(129,114,178,0.5)', border:'#8172B2'},
+  {bg:'rgba(204,185,116,0.5)', border:'#CCB974'},
+  {bg:'rgba(100,181,205,0.5)', border:'#64B5CD'},
+  {bg:'rgba(237,141,100,0.5)', border:'#ED8D64'},
+  {bg:'rgba(162,162,162,0.5)', border:'#A2A2A2'},
 ];
 
-const labels = Object.keys(raw);
-const datasets = labels.map((label, i) => ({
-  label,
-  data: [raw[label]],
-  backgroundColor: colors[i].bg,
-  borderColor: colors[i].border,
-  borderWidth: 2,
-  outlierBackgroundColor: colors[i].border,
-  outlierRadius: 4,
-  padding: 15,
-  itemRadius: 2.5,
-  itemBackgroundColor: '#333'
-}));
-
-new Chart(document.getElementById('chart'), {
-  type: 'boxplot',
-  data: { labels: ['U15'], datasets },
-  options: {
-    responsive: true,
-    plugins: {
-      legend: { position: 'top', labels: { font: { size: 13 }, usePointStyle: true, padding: 20 } },
-      tooltip: { callbacks: { label: ctx => {
-        const v = ctx.parsed; 
-        if (!v) return '';
-        return `${ctx.dataset.label}: Min ${v.min.toFixed(1)}% | Q1 ${v.q1.toFixed(1)}% | Med ${v.median.toFixed(1)}% | Q3 ${v.q3.toFixed(1)}% | Max ${v.max.toFixed(1)}%`;
-      }}}
-    },
-    scales: {
-      y: { title: { display: true, text: 'Void Rate (%)', font: { size: 13 } }, min: 0, max: 50,
-           grid: { color: 'rgba(0,0,0,0.06)' } },
-      x: { ticks: { display: false } }
-    }
-  }
+// Drag & drop
+const dropZone = document.getElementById('dropZone');
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.style.borderColor = '#4C72B0'; });
+dropZone.addEventListener('dragleave', () => { dropZone.style.borderColor = '#ccc'; });
+dropZone.addEventListener('drop', e => {
+  e.preventDefault(); dropZone.style.borderColor = '#ccc';
+  if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
 });
 
-// Stats table
-function q(arr, p) { const s = [...arr].sort((a,b)=>a-b); const i = (s.length-1)*p; const lo = Math.floor(i); return lo===i ? s[lo] : s[lo]+(s[lo+1]-s[lo])*(i-lo); }
+document.getElementById('fileInput').addEventListener('change', e => {
+  if (e.target.files.length) handleFile(e.target.files[0]);
+});
+
+function handleFile(file) {
+  document.getElementById('fileInfo').textContent = '✅ ' + file.name;
+  const reader = new FileReader();
+  reader.onload = e => {
+    workbook = XLSX.read(e.target.result, { type: 'array' });
+    const sel = document.getElementById('sheetSelect');
+    sel.innerHTML = workbook.SheetNames.map(n => `<option value="${n}">${n}</option>`).join('');
+    document.getElementById('sheetSelector').style.display = 'block';
+    loadSheet(workbook.SheetNames[0]);
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+document.getElementById('sheetSelect').addEventListener('change', e => loadSheet(e.target.value));
+
+function loadSheet(name) {
+  const ws = workbook.Sheets[name];
+  const json = XLSX.utils.sheet_to_json(ws, { defval: null });
+  if (!json.length) return;
+
+  // Extract columns: each key = build name, values = array of numbers
+  const keys = Object.keys(json[0]);
+  const raw = {};
+  keys.forEach(k => {
+    const vals = json.map(r => r[k]).filter(v => v !== null && v !== '' && !isNaN(parseFloat(v)));
+    // Handle both "12.5%" string and 0.125 number formats
+    raw[k] = vals.map(v => {
+      if (typeof v === 'string' && v.includes('%')) return parseFloat(v);
+      const n = parseFloat(v);
+      return n < 1 ? n * 100 : n; // if < 1, assume it's a ratio like 0.125 → 12.5%
+    });
+  });
+
+  // Filter out columns with no data
+  const builds = Object.keys(raw).filter(k => raw[k].length > 0);
+  if (!builds.length) return;
+
+  drawChart(builds, raw, name);
+  drawStats(builds, raw);
+  document.getElementById('chart-section').style.display = 'block';
+}
+
+function drawChart(builds, raw, sheetName) {
+  if (chartInstance) chartInstance.destroy();
+
+  const datasets = builds.map((label, i) => ({
+    label,
+    data: [raw[label]],
+    backgroundColor: COLORS[i % COLORS.length].bg,
+    borderColor: COLORS[i % COLORS.length].border,
+    borderWidth: 2,
+    outlierBackgroundColor: COLORS[i % COLORS.length].border,
+    outlierRadius: 4,
+    padding: 15,
+    itemRadius: 2.5,
+    itemBackgroundColor: '#333'
+  }));
+
+  const allVals = builds.flatMap(k => raw[k]);
+  const yMax = Math.ceil(Math.max(...allVals) / 5) * 5 + 5;
+
+  chartInstance = new Chart(document.getElementById('chart'), {
+    type: 'boxplot',
+    data: { labels: [sheetName], datasets },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { position: 'top', labels: { font: { size: 13 }, usePointStyle: true, padding: 20 } },
+        tooltip: { callbacks: { label: ctx => {
+          const v = ctx.parsed;
+          if (!v) return '';
+          return `${ctx.dataset.label}: Min ${v.min.toFixed(1)}% | Q1 ${v.q1.toFixed(1)}% | Med ${v.median.toFixed(1)}% | Q3 ${v.q3.toFixed(1)}% | Max ${v.max.toFixed(1)}%`;
+        }}}
+      },
+      scales: {
+        y: { title: { display: true, text: 'Void Rate (%)', font: { size: 13 } }, min: 0, max: yMax,
+             grid: { color: 'rgba(0,0,0,0.06)' } },
+        x: { ticks: { display: false } }
+      }
+    }
+  });
+}
+
+function q(arr, p) { const s=[...arr].sort((a,b)=>a-b); const i=(s.length-1)*p; const lo=Math.floor(i); return lo===i?s[lo]:s[lo]+(s[lo+1]-s[lo])*(i-lo); }
 const mean = a => a.reduce((s,v)=>s+v,0)/a.length;
 const std = a => { const m=mean(a); return Math.sqrt(a.reduce((s,v)=>s+(v-m)**2,0)/a.length); };
 
-let html = '<tr><th></th>' + labels.map((l,i) => `<th><span class="color-dot" style="background:${colors[i].border}"></span>${l}</th>`).join('') + '</tr>';
-const rows = [
-  ['N (samples)', a => a.length],
-  ['Min (%)', a => Math.min(...a).toFixed(2)],
-  ['Q1 (%)', a => q(a,0.25).toFixed(2)],
-  ['Median (%)', a => q(a,0.5).toFixed(2)],
-  ['Q3 (%)', a => q(a,0.75).toFixed(2)],
-  ['Max (%)', a => Math.max(...a).toFixed(2)],
-  ['Mean (%)', a => mean(a).toFixed(2)],
-  ['Std Dev (%)', a => std(a).toFixed(2)]
-];
-rows.forEach(([name, fn]) => {
-  html += `<tr><td style="font-weight:600;text-align:left">${name}</td>` + labels.map(l => `<td>${fn(raw[l])}</td>`).join('') + '</tr>';
-});
-document.getElementById('stats').innerHTML = html;
+function drawStats(builds, raw) {
+  let html = '<tr><th></th>' + builds.map((l,i) =>
+    `<th><span class="color-dot" style="background:${COLORS[i%COLORS.length].border}"></span>${l}</th>`
+  ).join('') + '</tr>';
+
+  const rows = [
+    ['N (samples)', a => a.length],
+    ['Min (%)', a => Math.min(...a).toFixed(2)],
+    ['Q1 (%)', a => q(a,0.25).toFixed(2)],
+    ['Median (%)', a => q(a,0.5).toFixed(2)],
+    ['Q3 (%)', a => q(a,0.75).toFixed(2)],
+    ['Max (%)', a => Math.max(...a).toFixed(2)],
+    ['Mean (%)', a => mean(a).toFixed(2)],
+    ['Std Dev (%)', a => std(a).toFixed(2)]
+  ];
+  rows.forEach(([name, fn]) => {
+    html += `<tr><td style="font-weight:600;text-align:left">${name}</td>` +
+      builds.map(l => `<td>${fn(raw[l])}</td>`).join('') + '</tr>';
+  });
+  document.getElementById('stats').innerHTML = html;
+}
 </script>
 </body>
 </html>
