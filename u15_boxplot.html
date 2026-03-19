@@ -3,15 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <title>Void Rate Box Plot</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-<script src="https://cdn.jsdelivr.net/npm/@sgratzl/chartjs-chart-boxplot@4"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
   body { font-family: 'Segoe UI', Arial, sans-serif; background: #f5f5f5; margin: 0; padding: 30px; }
-  .container { max-width: 1050px; margin: 0 auto; background: #fff; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.1); padding: 30px; }
+  .container { max-width: 1100px; margin: 0 auto; background: #fff; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.1); padding: 30px; }
   h1 { text-align: center; color: #333; margin-bottom: 5px; font-size: 22px; }
   .subtitle { text-align: center; color: #777; font-size: 14px; margin-bottom: 20px; }
-  .upload-area { text-align: center; padding: 30px; border: 2px dashed #ccc; border-radius: 10px; margin-bottom: 20px; background: #fafafa; }
+  .upload-area { text-align: center; padding: 30px; border: 2px dashed #ccc; border-radius: 10px; margin-bottom: 20px; background: #fafafa; transition: all .2s; }
   .upload-area:hover { border-color: #4C72B0; background: #f0f4fa; }
   .upload-btn { display: inline-block; padding: 12px 28px; background: #4C72B0; color: #fff; border-radius: 8px; cursor: pointer; font-size: 15px; border: none; }
   .upload-btn:hover { background: #3a5a8e; }
@@ -19,25 +17,26 @@
   .sheet-selector { margin: 15px 0; text-align: center; }
   .sheet-selector select { padding: 8px 16px; font-size: 14px; border-radius: 6px; border: 1px solid #ccc; }
   .sheet-selector label { font-size: 14px; margin-right: 8px; color: #555; }
-  canvas { max-height: 500px; }
+  .hint { color: #999; font-size: 12px; margin-top: 8px; }
+  #chart-section { display: none; }
+  #svgContainer { text-align: center; }
+  #svgContainer svg { max-width: 100%; height: auto; }
+  #tooltip { position: fixed; pointer-events: none; background: rgba(0,0,0,0.8); color: #fff; padding: 5px 10px; border-radius: 5px; font-size: 13px; display: none; z-index: 999; white-space: nowrap; }
   table { width: 100%; border-collapse: collapse; margin-top: 25px; font-size: 13px; }
   th, td { padding: 8px 12px; text-align: center; border: 1px solid #e0e0e0; }
   th { background: #f0f0f0; font-weight: 600; }
-  .color-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
-  #chart-section { display: none; }
-  .hint { color: #999; font-size: 12px; margin-top: 8px; }
 </style>
 </head>
 <body>
 <div class="container">
   <h1>Void Rate Box Plot</h1>
-  <p class="subtitle">Load an Excel file (.xlsx) to generate box plot</p>
+  <p class="subtitle">Load an Excel file (.xlsx) to generate box plot (JMP style — SVG vector)</p>
 
   <div class="upload-area" id="dropZone">
     <input type="file" id="fileInput" accept=".xlsx,.xls" style="display:none">
     <button class="upload-btn" onclick="document.getElementById('fileInput').click()">📂 Select Excel File</button>
     <p class="file-info" id="fileInfo">or drag & drop .xlsx file here</p>
-    <p class="hint">Expected format: each column = one build, header row = build names, data rows = void % values</p>
+    <p class="hint">Each column = one build, header row = build names, data rows = void % values</p>
   </div>
 
   <div class="sheet-selector" id="sheetSelector" style="display:none">
@@ -45,28 +44,17 @@
     <select id="sheetSelect"></select>
   </div>
 
+  <div id="tooltip"></div>
   <div id="chart-section">
-    <canvas id="chart"></canvas>
+    <div id="svgContainer"></div>
     <table id="stats"></table>
   </div>
 </div>
 
 <script>
 let workbook = null;
-let chartInstance = null;
 
-const COLORS = [
-  {bg:'rgba(76,114,176,0.5)',  border:'#4C72B0'},
-  {bg:'rgba(85,168,104,0.5)',  border:'#55A868'},
-  {bg:'rgba(196,78,82,0.5)',   border:'#C44E52'},
-  {bg:'rgba(129,114,178,0.5)', border:'#8172B2'},
-  {bg:'rgba(204,185,116,0.5)', border:'#CCB974'},
-  {bg:'rgba(100,181,205,0.5)', border:'#64B5CD'},
-  {bg:'rgba(237,141,100,0.5)', border:'#ED8D64'},
-  {bg:'rgba(162,162,162,0.5)', border:'#A2A2A2'},
-];
-
-// Drag & drop
+// --- File handling ---
 const dropZone = document.getElementById('dropZone');
 dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.style.borderColor = '#4C72B0'; });
 dropZone.addEventListener('dragleave', () => { dropZone.style.borderColor = '#ccc'; });
@@ -74,7 +62,6 @@ dropZone.addEventListener('drop', e => {
   e.preventDefault(); dropZone.style.borderColor = '#ccc';
   if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
 });
-
 document.getElementById('fileInput').addEventListener('change', e => {
   if (e.target.files.length) handleFile(e.target.files[0]);
 });
@@ -91,92 +78,161 @@ function handleFile(file) {
   };
   reader.readAsArrayBuffer(file);
 }
-
 document.getElementById('sheetSelect').addEventListener('change', e => loadSheet(e.target.value));
 
 function loadSheet(name) {
   const ws = workbook.Sheets[name];
   const json = XLSX.utils.sheet_to_json(ws, { defval: null });
   if (!json.length) return;
-
-  // Extract columns: each key = build name, values = array of numbers
   const keys = Object.keys(json[0]);
   const raw = {};
   keys.forEach(k => {
     const vals = json.map(r => r[k]).filter(v => v !== null && v !== '' && !isNaN(parseFloat(v)));
-    // Handle both "12.5%" string and 0.125 number formats
     raw[k] = vals.map(v => {
       if (typeof v === 'string' && v.includes('%')) return parseFloat(v);
       const n = parseFloat(v);
-      return n < 1 ? n * 100 : n; // if < 1, assume it's a ratio like 0.125 → 12.5%
+      return n < 1 ? n * 100 : n;
     });
   });
-
-  // Filter out columns with no data
   const builds = Object.keys(raw).filter(k => raw[k].length > 0);
   if (!builds.length) return;
-
-  drawChart(builds, raw, name);
+  drawSVGBoxPlot(builds, raw, name);
   drawStats(builds, raw);
   document.getElementById('chart-section').style.display = 'block';
 }
 
-function drawChart(builds, raw, sheetName) {
-  if (chartInstance) chartInstance.destroy();
+// --- Stats helpers ---
+function quartile(arr, p) {
+  const s = [...arr].sort((a, b) => a - b);
+  const i = (s.length - 1) * p;
+  const lo = Math.floor(i);
+  return lo === i ? s[lo] : s[lo] + (s[lo + 1] - s[lo]) * (i - lo);
+}
+const mean = a => a.reduce((s, v) => s + v, 0) / a.length;
+const std = a => { const m = mean(a); return Math.sqrt(a.reduce((s, v) => s + (v - m) ** 2, 0) / a.length); };
 
-  const datasets = builds.map((label, i) => ({
-    label,
-    data: [raw[label]],
-    backgroundColor: COLORS[i % COLORS.length].bg,
-    borderColor: COLORS[i % COLORS.length].border,
-    borderWidth: 2,
-    outlierBackgroundColor: COLORS[i % COLORS.length].border,
-    outlierRadius: 4,
-    padding: 15,
-    itemRadius: 2.5,
-    itemBackgroundColor: '#333'
-  }));
+// --- SVG Box Plot (JMP style, vector) ---
+function drawSVGBoxPlot(builds, raw, sheetName) {
+  const nBuilds = builds.length;
+  const colWidth = Math.max(120, Math.min(180, 900 / nBuilds));
+  const mL = 65, mR = 30, mT = 20, mB = 55;
+  const plotW = nBuilds * colWidth;
+  const plotH = 420;
+  const W = mL + plotW + mR;
+  const H = mT + plotH + mB;
 
   const allVals = builds.flatMap(k => raw[k]);
+  const yMin = 0;
   const yMax = Math.ceil(Math.max(...allVals) / 5) * 5 + 5;
+  const yToP = v => mT + plotH - ((v - yMin) / (yMax - yMin)) * plotH;
 
-  chartInstance = new Chart(document.getElementById('chart'), {
-    type: 'boxplot',
-    data: { labels: [sheetName], datasets },
-    options: {
-      responsive: true,
-      plugins: {
-        legend: { position: 'top', labels: { font: { size: 13 }, usePointStyle: true, padding: 20 } },
-        tooltip: { callbacks: { label: ctx => {
-          const v = ctx.parsed;
-          if (!v) return '';
-          return `${ctx.dataset.label}: Min ${v.min.toFixed(1)}% | Q1 ${v.q1.toFixed(1)}% | Med ${v.median.toFixed(1)}% | Q3 ${v.q3.toFixed(1)}% | Max ${v.max.toFixed(1)}%`;
-        }}}
-      },
-      scales: {
-        y: { title: { display: true, text: 'Void Rate (%)', font: { size: 13 } }, min: 0, max: yMax,
-             grid: { color: 'rgba(0,0,0,0.06)' } },
-        x: { ticks: { display: false } }
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" style="font-family:'Segoe UI',Arial,sans-serif;">`;
+
+  // Background
+  svg += `<rect x="0" y="0" width="${W}" height="${H}" fill="white"/>`;
+
+  // Y grid + labels
+  const yStep = yMax <= 30 ? 5 : 10;
+  for (let v = yMin; v <= yMax; v += yStep) {
+    const y = yToP(v);
+    svg += `<line x1="${mL}" y1="${y}" x2="${mL + plotW}" y2="${y}" stroke="#ddd" stroke-width="0.5"/>`;
+    svg += `<text x="${mL - 8}" y="${y}" text-anchor="end" dominant-baseline="central" font-size="12" fill="#666">${v}%</text>`;
+  }
+
+  // Y axis line
+  svg += `<line x1="${mL}" y1="${mT}" x2="${mL}" y2="${mT + plotH}" stroke="#333" stroke-width="1"/>`;
+
+  // Y axis title
+  svg += `<text x="16" y="${mT + plotH / 2}" text-anchor="middle" dominant-baseline="central" font-size="13" fill="#555" transform="rotate(-90,16,${mT + plotH / 2})">Void Rate (%)</text>`;
+
+  const boxW = colWidth * 0.45;
+  const dotR = 3.5;
+
+  builds.forEach((buildName, i) => {
+    const data = raw[buildName];
+    const cx = mL + i * colWidth + colWidth / 2;
+    const sorted = [...data].sort((a, b) => a - b);
+    const q1 = quartile(data, 0.25);
+    const q3 = quartile(data, 0.75);
+    const med = quartile(data, 0.5);
+    const minV = Math.min(...data);
+    const maxV = Math.max(...data);
+    const yQ1 = yToP(q1), yQ3 = yToP(q3), yMed = yToP(med);
+    const yMinP = yToP(minV), yMaxP = yToP(maxV);
+    const capW = boxW * 0.5;
+
+    // Whiskers
+    svg += `<line x1="${cx}" y1="${yQ3}" x2="${cx}" y2="${yMaxP}" stroke="#333" stroke-width="1.2"/>`;
+    svg += `<line x1="${cx}" y1="${yQ1}" x2="${cx}" y2="${yMinP}" stroke="#333" stroke-width="1.2"/>`;
+
+    // Caps
+    svg += `<line x1="${cx - capW}" y1="${yMaxP}" x2="${cx + capW}" y2="${yMaxP}" stroke="#333" stroke-width="1.2"/>`;
+    svg += `<line x1="${cx - capW}" y1="${yMinP}" x2="${cx + capW}" y2="${yMinP}" stroke="#333" stroke-width="1.2"/>`;
+
+    // Box
+    svg += `<rect x="${cx - boxW / 2}" y="${yQ3}" width="${boxW}" height="${yQ1 - yQ3}" fill="white" stroke="#333" stroke-width="1.5"/>`;
+
+    // Median
+    svg += `<line x1="${cx - boxW / 2}" y1="${yMed}" x2="${cx + boxW / 2}" y2="${yMed}" stroke="#333" stroke-width="1.8"/>`;
+
+    // Data points — JMP style stacking
+    const tolerance = (yMax - yMin) * 0.012;
+    const pointGroups = [];
+    const used = new Array(sorted.length).fill(false);
+    for (let j = 0; j < sorted.length; j++) {
+      if (used[j]) continue;
+      const group = [sorted[j]];
+      used[j] = true;
+      for (let k = j + 1; k < sorted.length; k++) {
+        if (!used[k] && Math.abs(sorted[k] - sorted[j]) <= tolerance) {
+          group.push(sorted[k]);
+          used[k] = true;
+        }
       }
+      pointGroups.push(group);
     }
+
+    pointGroups.forEach(group => {
+      const n = group.length;
+      const spacing = Math.min(dotR * 2.2, boxW * 0.7 / Math.max(n - 1, 1));
+      const startX = cx - (n - 1) * spacing / 2;
+      group.forEach((val, gi) => {
+        const px = n === 1 ? cx : startX + gi * spacing;
+        const py = yToP(val);
+        svg += `<circle cx="${px}" cy="${py}" r="${dotR}" fill="#222" class="dot" data-tip="${buildName}: ${val.toFixed(2)}%" style="cursor:pointer"/>`;
+      });
+    });
+
+    // Label
+    svg += `<text x="${cx}" y="${mT + plotH + 18}" text-anchor="middle" font-size="13" fill="#333">${buildName}</text>`;
+  });
+
+  svg += '</svg>';
+  document.getElementById('svgContainer').innerHTML = svg;
+
+  // Tooltip events
+  const tip = document.getElementById('tooltip');
+  document.querySelectorAll('.dot').forEach(dot => {
+    dot.addEventListener('mouseenter', e => {
+      tip.textContent = dot.getAttribute('data-tip');
+      tip.style.display = 'block';
+    });
+    dot.addEventListener('mousemove', e => {
+      tip.style.left = (e.clientX + 12) + 'px';
+      tip.style.top = (e.clientY - 30) + 'px';
+    });
+    dot.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
   });
 }
 
-function q(arr, p) { const s=[...arr].sort((a,b)=>a-b); const i=(s.length-1)*p; const lo=Math.floor(i); return lo===i?s[lo]:s[lo]+(s[lo+1]-s[lo])*(i-lo); }
-const mean = a => a.reduce((s,v)=>s+v,0)/a.length;
-const std = a => { const m=mean(a); return Math.sqrt(a.reduce((s,v)=>s+(v-m)**2,0)/a.length); };
-
 function drawStats(builds, raw) {
-  let html = '<tr><th></th>' + builds.map((l,i) =>
-    `<th><span class="color-dot" style="background:${COLORS[i%COLORS.length].border}"></span>${l}</th>`
-  ).join('') + '</tr>';
-
+  let html = '<tr><th></th>' + builds.map(l => `<th>${l}</th>`).join('') + '</tr>';
   const rows = [
     ['N (samples)', a => a.length],
     ['Min (%)', a => Math.min(...a).toFixed(2)],
-    ['Q1 (%)', a => q(a,0.25).toFixed(2)],
-    ['Median (%)', a => q(a,0.5).toFixed(2)],
-    ['Q3 (%)', a => q(a,0.75).toFixed(2)],
+    ['Q1 (%)', a => quartile(a, 0.25).toFixed(2)],
+    ['Median (%)', a => quartile(a, 0.5).toFixed(2)],
+    ['Q3 (%)', a => quartile(a, 0.75).toFixed(2)],
     ['Max (%)', a => Math.max(...a).toFixed(2)],
     ['Mean (%)', a => mean(a).toFixed(2)],
     ['Std Dev (%)', a => std(a).toFixed(2)]
